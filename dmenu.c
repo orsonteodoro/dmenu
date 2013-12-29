@@ -1,15 +1,27 @@
 /* See LICENSE file for copyright and license details. */
+#if WINDOWS
+#define WIN32_LEAN_AND_MEAN
+#define _WIN32_WINNT			0x0500
+
+#include <windows.h>
+#include <winuser.h>
+#endif
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#if USE_XLIB
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #ifdef XINERAMA
 #include <X11/extensions/Xinerama.h>
+#endif
+#endif
+#if USE_WINAPI
+#include <mshtmcid.h>
 #endif
 #include "draw.h"
 
@@ -22,7 +34,11 @@ typedef struct Item Item;
 struct Item {
 	char *text;
 	Item *left, *right;
+#if USE_XLIB
 	Bool out;
+#elif USE_WINAPI
+	BOOL out;
+#endif
 };
 
 static void appenditem(Item *item, Item **list, Item **last);
@@ -31,13 +47,22 @@ static char *cistrstr(const char *s, const char *sub);
 static void drawmenu(void);
 static void grabkeyboard(void);
 static void insert(const char *str, ssize_t n);
+#if USE_XLIB
 static void keypress(XKeyEvent *ev);
+#elif USE_WINAPI
+static void keypress(WPARAM ksym);
+#endif
 static void match(void);
 static size_t nextrune(int inc);
 static void paste(void);
 static void readstdin(void);
 static void run(void);
+#if USE_XLIB
 static void setup(void);
+#elif USE_WINAPI
+static void setup(HINSTANCE hInstance, int nCmdShow);
+static void die(const char *errstr, ...);
+#endif
 static void usage(void);
 
 static char text[BUFSIZ] = "";
@@ -47,35 +72,115 @@ static size_t cursor = 0;
 static unsigned long normcol[ColLast];
 static unsigned long selcol[ColLast];
 static unsigned long outcol[ColLast];
+#if USE_XLIB
 static Atom clip, utf8;
+#endif
 static DC *dc;
 static Item *items = NULL;
 static Item *matches, *matchend;
 static Item *prev, *curr, *next, *sel;
+#if USE_XLIB
 static Window win;
 static XIC xic;
+#elif USE_WINAPI
+static HWND win;
+static int sx, sy, sw, sh; /* X display screen geometry x, y, width, height */ 
+static int by, bh, blw;    /* bar geometry y, height and layout symbol width */
+static int wx, wy, ww, wh; /* window area geometry x, y, width, height, bar excluded */
+#endif
 static int mon = -1;
 
 #include "config.h"
+#if USE_WINAPI
+/* macros */
+#define LENGTH(x)               (sizeof x / sizeof x[0])
+/* elements of the window whose color should be set to the values in the array below */
+static int colorwinelements[] = { COLOR_ACTIVEBORDER, COLOR_INACTIVEBORDER };
+static COLORREF colors[2][LENGTH(colorwinelements)] = { 
+	{ 0, 0 }, /* used to save the values before dwm started */
+	{ selbordercolor, normbordercolor },
+};
+#define NAME					"dmenu" 	/* Used for window name/class */
+static HWND dmhwnd;
+#endif
 
 static int (*fstrncmp)(const char *, const char *, size_t) = strncmp;
 static char *(*fstrstr)(const char *, const char *) = strstr;
 
+#if USE_XLIB
 int
 main(int argc, char *argv[]) {
 	Bool fast = False;
+#elif USE_WINAPI
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {	
+	BOOL fast = FALSE;
+#endif
 	int i;
 
-	for(i = 1; i < argc; i++)
+#if USE_WINAPI
+	char **argv;
+	int argc = 0, targc = 0;
+	char buffer[512];
+	char *t;
+
+	for(i=0; i < strlen(lpCmdLine); i++)
+		if (lpCmdLine[i] == ' ')
+			targc++;
+	targc+=2;
+	argv = malloc(targc);
+	argv[argc] = "dmenu.exe";
+	argc++;
+	t = strtok(lpCmdLine, " "); 
+	targc--;
+	buffer[0] = NULL;
+	
+	fflush(stdout); /*strange bug*/
+	while(t != NULL && targc)
+	{
+		if (t[0] != '-')
+		{
+			do
+			{
+				strncat(buffer, t, 512);
+				t = strtok(NULL, " ");
+				if (t != NULL && t[0] != '-')
+					strncat(buffer, " ", 512);
+				targc--;
+			} while (t != NULL && t[0] != '-' && targc);
+			argv[argc]=strdup(buffer);
+			argc++;
+			buffer[0] = NULL;
+		}
+		else
+		{
+			argv[argc]=strdup(t);
+			argc++;
+			buffer[0] = NULL;
+			t = strtok(NULL, " ");
+			targc--;
+		}
+	}
+
+#endif
+
+	for(i = 1; i < argc; i++) {
 		/* these options take no arguments */
 		if(!strcmp(argv[i], "-v")) {      /* prints version information */
 			puts("dmenu-"VERSION", © 2006-2012 dmenu engineers, see LICENSE for details");
 			exit(EXIT_SUCCESS);
 		}
 		else if(!strcmp(argv[i], "-b"))   /* appears at the bottom of the screen */
+#if USE_XLIB
 			topbar = False;
+#elif USE_WINAPI
+			topbar = FALSE;
+#endif
 		else if(!strcmp(argv[i], "-f"))   /* grabs keyboard before reading stdin */
+#if USE_XLIB
 			fast = True;
+#elif USE_WINAPI
+			fast = TRUE;
+#endif
 		else if(!strcmp(argv[i], "-i")) { /* case-insensitive item matching */
 			fstrncmp = strncasecmp;
 			fstrstr = cistrstr;
@@ -101,9 +206,11 @@ main(int argc, char *argv[]) {
 			selfgcolor = argv[++i];
 		else
 			usage();
-
+	}
 	dc = initdc();
+#if USE_XLIB
 	initfont(dc, font);
+#endif
 
 	if(fast) {
 		grabkeyboard();
@@ -113,11 +220,78 @@ main(int argc, char *argv[]) {
 		readstdin();
 		grabkeyboard();
 	}
+#if USE_XLIB
 	setup();
+#elif USE_WINAPI
+	setup(hInstance, nShowCmd);
+#endif
 	run();
 
 	return 1; /* unreachable */
 }
+
+#if USE_WINAPI
+
+void
+cleanup() {
+	ReleaseDC(dmhwnd,dc->gc);
+	
+	SetSysColors(LENGTH(colorwinelements), colorwinelements, colors[0]); 
+
+	DestroyWindow(dmhwnd);
+}
+
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+void
+die(const char *errstr, ...) {
+	va_list ap;
+
+	va_start(ap, errstr);
+	vfprintf(stderr, errstr, ap);
+	va_end(ap);
+	cleanup();
+	exit(EXIT_FAILURE);
+}
+
+void
+updategeom(void) {
+	RECT wa;
+	HWND hwnd = FindWindow("Shell_TrayWnd", NULL);
+	/* check if the windows taskbar is visible and adjust
+	 * the workspace accordingly.
+	 */
+	if (hwnd && IsWindowVisible(hwnd)) {	
+		SystemParametersInfo(SPI_GETWORKAREA, 0, &wa, 0);
+		sx = wa.left;
+		sy = wa.top;
+		sw = wa.right - wa.left;
+		sh = wa.bottom - wa.top;
+	} else {
+		sx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+		sy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+		sw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+		sh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+	}
+
+	bh = 20; /* XXX: fixed value */
+
+	/* window area geometry */
+	wx = sx;
+	
+	/* wy = showbar && topbar ? sy + bh : sy; */
+	wy = sy + bh;
+	ww = sw;
+	
+	/* wh = showbar ? sh - bh : sh; */
+	wh = sh - bh;
+	
+	/* bar position */
+	/* by = showbar ? (topbar ? wy - bh : wy + wh) : -bh; */
+	by = wy - bh;
+	/* debug("updategeom: %d x %d\n", ww, wh); */
+}
+#endif
 
 void
 appenditem(Item *item, Item **list, Item **last) {
@@ -166,7 +340,11 @@ drawmenu(void) {
 	dc->x = 0;
 	dc->y = 0;
 	dc->h = bh;
+#if USE_XLIB	
 	drawrect(dc, 0, 0, mw, mh, True, BG(dc, normcol));
+#elif USE_WINAPI
+	drawrect(dc, 0, 0, mw, mh, TRUE, BG(dc, normcol));
+#endif
 
 	if(prompt && *prompt) {
 		dc->w = promptw;
@@ -177,7 +355,11 @@ drawmenu(void) {
 	dc->w = (lines > 0 || !matches) ? mw - dc->x : inputw;
 	drawtext(dc, text, normcol);
 	if((curpos = textnw(dc, text, cursor) + dc->h/2 - 2) < dc->w)
+#if USE_XLIB	
 		drawrect(dc, curpos, 2, 1, dc->h - 4, True, FG(dc, normcol));
+#elif USE_WINAPI
+		drawrect(dc, curpos, 2, 1, dc->h - 4, TRUE, FG(dc, normcol));
+#endif
 
 	if(lines > 0) {
 		/* draw vertical list */
@@ -214,9 +396,13 @@ grabkeyboard(void) {
 
 	/* try to grab keyboard, we may have to wait for another process to ungrab */
 	for(i = 0; i < 1000; i++) {
+#if USE_XLIB		
 		if(XGrabKeyboard(dc->dpy, DefaultRootWindow(dc->dpy), True,
 		                 GrabModeAsync, GrabModeAsync, CurrentTime) == GrabSuccess)
 			return;
+#elif USE_WINAPI
+		return;
+#endif	
 		usleep(1000);
 	}
 	eprintf("cannot grab keyboard\n");
@@ -234,6 +420,7 @@ insert(const char *str, ssize_t n) {
 	match();
 }
 
+#if USE_XLIB
 void
 keypress(XKeyEvent *ev) {
 	char buf[32];
@@ -397,6 +584,178 @@ keypress(XKeyEvent *ev) {
 	}
 	drawmenu();
 }
+#elif USE_WINAPI
+void
+keypress(WPARAM ksym/*XKeyEvent *ev*/) {
+	char buf[32];
+	int len;
+
+	char c;
+	c = MapVirtualKey(ksym,MAPVK_VK_TO_CHAR);
+	if (GetAsyncKeyState(VK_SHIFT) || (GetKeyState(VK_CAPITAL) & 0x0001) != 0)
+		sprintf(buf,"%c",c);
+	else
+		sprintf(buf,"%c",tolower(c));
+	len = 1;
+
+	/*
+	KeySym ksym = NoSymbol;
+	Status status;
+
+	len = XmbLookupString(xic, ev, buf, sizeof buf, &ksym, &status);
+	if(status == XBufferOverflow)
+		return;
+		//VK_LCONTROL VK_RCONTROL
+	len = SendMessage(dc->hedit, WM_GETTEXTLENGTH, 0, 0);
+	*/
+	
+	if(GetAsyncKeyState(VK_CONTROL)/*ev->state & ControlMask*/)
+		switch(ksym) {
+		case 0x41/*XK_a*/: ksym = VK_HOME;      break;
+		case 0x42/*XK_b*/: ksym = VK_LEFT;      break;
+		case 0x43/*XK_c*/: ksym = VK_ESCAPE;    break;
+		case 0x44/*XK_d*/: ksym = VK_DELETE;    break;
+		case 0x45/*XK_e*/: ksym = VK_END;       break;
+		case 0x46/*XK_f*/: ksym = VK_RIGHT;     break;
+		case 0x48/*XK_h*/: ksym = VK_BACK; break;
+		case 0x49/*XK_i*/: ksym = VK_TAB;       break;
+		case 0x4A/*XK_j*/: ksym = VK_RETURN;    break;
+		case 0x4D/*XK_m*/: ksym = VK_RETURN;    break;
+		case 0x4E/*XK_n*/: ksym = VK_DOWN;      break;
+		case 0x50/*XK_p*/: ksym = VK_UP;        break;
+
+		case 0x4B/*XK_k*/: /* delete right */
+			text[cursor] = '\0';
+			match();
+			break;
+		case 0x55/*XK_u*/: /* delete left */
+			insert(NULL, 0 - cursor);
+			break;
+		case 0x57/*XK_w*/: /* delete word */
+			while(cursor > 0 && text[nextrune(-1)] == ' ')
+				insert(NULL, nextrune(-1) - cursor);
+			while(cursor > 0 && text[nextrune(-1)] != ' ')
+				insert(NULL, nextrune(-1) - cursor);
+			break;
+		case 0x59/*XK_y*/: /* paste selection */
+/*			XConvertSelection(dc->dpy, (ev->state & ShiftMask) ? clip : XA_PRIMARY,
+			                  utf8, utf8, win, CurrentTime);*/
+			return;
+		default:
+			return;
+		}
+	else if(GetAsyncKeyState(VK_MENU)/*ev->state & Mod1Mask*/)
+		switch(ksym) {
+		case 0x47/*XK_g*/: 
+			if (GetAsyncKeyState(VK_SHIFT) || (GetKeyState(VK_CAPITAL) & 0x0001) != 0)
+				ksym = VK_END; /*XK_G*/
+			else
+				ksym = VK_HOME;  /*XK_g*/
+		break;
+		/* case 0x47 XK_G: ksym = VK_END;   break;  handled */
+		case 0x48/*XK_h*/: ksym = VK_UP;    break;
+		case 0x4A/*XK_j*/: ksym = VK_NEXT;  break;
+		case 0x4B/*XK_k*/: ksym = VK_PRIOR; break;
+		case 0x4C/*XK_l*/: ksym = VK_DOWN;  break;
+		default:
+			return;
+		}
+	switch(ksym) {
+	default:
+		if(!iscntrl(*buf))
+			insert(buf, len);
+		break;
+	case VK_DELETE:
+		if(text[cursor] == '\0')
+			return;
+		cursor = nextrune(+1);
+		/* fallthrough */
+	case VK_BACK:
+		if(cursor == 0)
+			return;
+		insert(NULL, nextrune(-1) - cursor);
+		break;
+	case VK_END:
+		if(text[cursor] != '\0') {
+			cursor = strlen(text);
+			break;
+		}
+		if(next) {
+			/* jump to end of list and position items in reverse */
+			curr = matchend;
+			calcoffsets();
+			curr = prev;
+			calcoffsets();
+			while(next && (curr = curr->right))
+				calcoffsets();
+		}
+		sel = matchend;
+		break;
+	case VK_ESCAPE:
+		exit(EXIT_FAILURE);
+	case VK_HOME:
+		if(sel == matches) {
+			cursor = 0;
+			break;
+		}
+		sel = curr = matches;
+		calcoffsets();
+		break;
+	case VK_LEFT:
+		if(cursor > 0 && (!sel || !sel->left || lines > 0)) {
+			cursor = nextrune(-1);
+			break;
+		}
+		if(lines > 0)
+			return;
+		/* fallthrough */
+	case VK_UP:
+		if(sel && sel->left && (sel = sel->left)->right == curr) {
+			curr = prev;
+			calcoffsets();
+		}
+		break;
+	case VK_NEXT:
+		if(!next)
+			return;
+		sel = curr = next;
+		calcoffsets();
+		break;
+	case VK_PRIOR:
+		if(!prev)
+			return;
+		sel = curr = prev;
+		calcoffsets();
+		break;
+	case VK_RETURN:
+/*	case VK_RETURN*//*XK_KP_Enter:*/
+		puts((sel && !(GetAsyncKeyState(VK_SHIFT)/*ev->state & ShiftMask*/)) ? sel->text : text);
+		exit(EXIT_SUCCESS);
+	case VK_RIGHT:
+		if(text[cursor] != '\0') {
+			cursor = nextrune(+1);
+			break;
+		}
+		if(lines > 0)
+			return;
+		/* fallthrough */
+	case VK_DOWN:
+		if(sel && sel->right && (sel = sel->right) == next) {
+			curr = next;
+			calcoffsets();
+		}
+		break;
+	case VK_TAB:
+		if(!sel)
+			return;
+		strncpy(text, sel->text, sizeof text);
+		cursor = strlen(text);
+		match();
+		break;
+	}
+	drawmenu();
+}
+#endif
 
 void
 match(void) {
@@ -464,6 +823,7 @@ nextrune(int inc) {
 void
 paste(void) {
 	char *p, *q;
+#if USE_XLIB	
 	int di;
 	unsigned long dl;
 	Atom da;
@@ -473,6 +833,21 @@ paste(void) {
 	                   utf8, &da, &di, &dl, &dl, (unsigned char **)&p);
 	insert(p, (q = strchr(p, '\n')) ? q-p : (ssize_t)strlen(p));
 	XFree(p);
+#elif USE_WINAPI
+	HGLOBAL h;
+	if (!OpenClipboard(dc->hwnd))
+		return;
+	if ((h = GetClipboardData(CF_TEXT)))
+	{
+		p = GlobalLock(h);
+		if (p != NULL)
+		{
+			insert(p, (q = strchr(p, '\n')) ? q-p : (ssize_t)strlen(p));
+			GlobalUnlock(h);
+		}
+	}
+	CloseClipboard();
+#endif	
 	drawmenu();
 }
 
@@ -490,7 +865,11 @@ readstdin(void) {
 			*p = '\0';
 		if(!(items[i].text = strdup(buf)))
 			eprintf("cannot strdup %u bytes:", strlen(buf)+1);
+#if USE_XLIB			
 		items[i].out = False;
+#elif USE_WINAPI
+		items[i].out = FALSE;
+#endif
 		if(strlen(items[i].text) > max)
 			max = strlen(maxstr = items[i].text);
 	}
@@ -502,6 +881,7 @@ readstdin(void) {
 
 void
 run(void) {
+#if USE_XLIB
 	XEvent ev;
 
 	while(!XNextEvent(dc->dpy, &ev)) {
@@ -525,8 +905,63 @@ run(void) {
 			break;
 		}
 	}
+#elif USE_WINAPI
+	MSG msg;
+	
+	while (GetMessage(&msg, NULL, 0, 0) > 0) {
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+#endif	
 }
 
+#if USE_WINAPI
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg) {
+		case WM_CREATE:
+		{
+			RECT r;
+			GetClientRect(hwnd, &r);
+			dc->hcanvas = CreateWindowEx(WS_EX_APPWINDOW, "STATIC", "",
+			WS_CHILD|WS_VISIBLE,
+			0, 0, 0, 0, 
+			hwnd, 0, GetModuleHandle(NULL),
+			NULL);
+			dc->gc = GetDC(dc->hcanvas);
+		}
+			break;
+		case WM_CLOSE:
+			/* cleanup(); */
+			break;
+		case WM_DESTROY:
+			PostQuitMessage(0);
+			break;
+		case WM_PAINT:
+			if(dc->canvas)
+				mapdc(dc, win, mw, mh);
+			break;
+		case WM_KEYDOWN:
+			keypress(wParam);
+			break;
+		case WM_COMMAND:
+			switch (LOWORD(wParam)) 
+			{ 
+				case IDM_PASTE:
+					if (IsClipboardFormatAvailable(CF_TEXT))
+						paste();
+				break;
+			}
+			break;
+		default:
+			return DefWindowProc(hwnd, msg, wParam, lParam); 
+	}
+
+	return 0;
+}
+#endif
+
+#if USE_XLIB
 void
 setup(void) {
 	int x, y, screen = DefaultScreen(dc->dpy);
@@ -537,6 +972,12 @@ setup(void) {
 	int n;
 	XineramaScreenInfo *info;
 #endif
+#elif USE_WINAPI
+void
+setup(HINSTANCE hInstance, int nCmdShow) {
+	int i;
+	RECT r;
+#endif
 
 	normcol[ColBG] = getcolor(dc, normbgcolor);
 	normcol[ColFG] = getcolor(dc, normfgcolor);
@@ -545,13 +986,16 @@ setup(void) {
 	outcol[ColBG]  = getcolor(dc, outbgcolor);
 	outcol[ColFG]  = getcolor(dc, outfgcolor);
 
+#if USE_XLIB
 	clip = XInternAtom(dc->dpy, "CLIPBOARD",   False);
 	utf8 = XInternAtom(dc->dpy, "UTF8_STRING", False);
+#endif
 
 	/* calculate menu geometry */
 	bh = dc->font.height + 2;
 	lines = MAX(lines, 0);
 	mh = (lines + 1) * bh;
+#if USE_XLIB
 #ifdef XINERAMA
 	if((info = XineramaQueryScreens(dc->dpy, &n))) {
 		int a, j, di, i = 0, area = 0;
@@ -594,10 +1038,13 @@ setup(void) {
 		y = topbar ? 0 : DisplayHeight(dc->dpy, screen) - mh;
 		mw = DisplayWidth(dc->dpy, screen);
 	}
+#endif
+	/* see note1 */
 	promptw = (prompt && *prompt) ? textw(dc, prompt) : 0;
 	inputw = MIN(inputw, mw/3);
 	match();
 
+#if USE_XLIB
 	/* create menu window */
 	swa.override_redirect = True;
 	swa.background_pixel = normcol[ColBG];
@@ -613,6 +1060,67 @@ setup(void) {
 	                XNClientWindow, win, XNFocusWindow, win, NULL);
 
 	XMapRaised(dc->dpy, win);
+#elif USE_WINAPI
+	/* save colors so we can restore them in cleanup */
+	for (i = 0; i < LENGTH(colorwinelements); i++)
+		colors[0][i] = GetSysColor(colorwinelements[i]);
+	
+	SetSysColors(LENGTH(colorwinelements), colorwinelements, colors[1]); 
+
+	updategeom();
+
+	/* message window */
+
+	WNDCLASSEX winClass;
+
+	winClass.cbSize = sizeof(WNDCLASSEX);
+	winClass.style = 0;
+	winClass.lpfnWndProc = WndProc;
+	winClass.cbClsExtra = 0;
+	winClass.cbWndExtra = 0;
+	winClass.hInstance = hInstance;
+	winClass.hIcon = NULL;
+	winClass.hIconSm = NULL;
+	winClass.hCursor = NULL;
+	winClass.hbrBackground = CreateSolidBrush(BG(dc, normcol));
+	winClass.lpszMenuName = NULL;
+	winClass.lpszClassName = NAME;
+
+	if (!RegisterClassEx(&winClass))
+		die("Error registering window class");
+
+	dmhwnd = CreateWindowEx(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, NAME, NAME, 
+		WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 
+		0, 0, 0, 0, 0, NULL, hInstance, NULL);
+
+	if (!dmhwnd)
+		die("Error creating window");
+
+	SetFocus(dmhwnd);
+
+	ShowWindow(dmhwnd, nCmdShow);
+    UpdateWindow(dmhwnd);
+
+	dc->hwnd = dmhwnd;
+	
+	initfont(dc, font);
+	bh = dc->font.height + 2;
+	lines = MAX(lines, 0);
+	mh = (lines + 1) * bh;
+	SetWindowPos(dmhwnd, 0, 0, by, ww, bh, 0);
+	
+	GetClientRect(dmhwnd, &r);
+	SetWindowPos(dc->hcanvas, 0, 0, 0, r.right, r.bottom, 0);
+
+	/* note1 */
+	{
+		RECT rect;
+		GetWindowRect(dmhwnd, &rect);
+		/* x = rect.left; */
+		/* y = rect.top; */
+		mw = rect.right - rect.left;
+	}
+#endif
 	resizedc(dc, mw, mh);
 	drawmenu();
 }
