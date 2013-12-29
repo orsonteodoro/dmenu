@@ -33,7 +33,7 @@
 
 /* portibility stuff */
 #if USE_WINAPI
-#define WINDOW HWND
+#define Window HWND
 #define Pixmap HDC
 #define GC HDC
 #define False FALSE
@@ -126,11 +126,10 @@ static DC *dc;
 static Item *items = NULL;
 static Item *matches, *matchend;
 static Item *prev, *curr, *next, *sel;
-#if USE_XLIB
 static Window win;
+#if USE_XLIB
 static XIC xic;
 #elif USE_WINAPI
-static HWND win;
 static int sx, sy, sw, sh; /* X display screen geometry x, y, width, height */ 
 static int by, bh;    /* bar geometry y, height and layout symbol width */
 static int wx, wy, ww, wh; /* window area geometry x, y, width, height, bar excluded */
