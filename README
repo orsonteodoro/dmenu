@@ -6,6 +6,7 @@ dmenu is an efficient dynamic menu for X.
 Requirements
 ------------
 In order to build dmenu you need the Xlib header files.
+Windows users require the Cygwin environment.
 
 
 Installation
