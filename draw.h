@@ -17,22 +17,27 @@
 #define FG(dc, col)  ((col)[(dc)->invert ? ColBG : ColFG])
 #define BG(dc, col)  ((col)[(dc)->invert ? ColFG : ColBG])
 
+#if USE_WINAPI
+#define Window HWND
+#define Bool BOOL
+#define Pixmap HDC
+#define GC HDC
+#define True TRUE
+#endif
+
 enum { ColBG, ColFG, ColBorder, ColLast };
 
 typedef struct {
 	int x, y, w, h;
-#if USE_XLIB	
 	Bool invert;
-	Display *dpy;
-	GC gc;
 	Pixmap canvas;
+	GC gc;
+#if USE_XLIB	
+	Display *dpy;
 #elif USE_WINAPI
 	HWND hwnd;
 	HWND hedit;
 	HWND hcanvas;
-	HDC gc; 
-	BOOL invert;
-	HDC canvas;
 	HBITMAP hbmp;
 	unsigned long norm[ColLast];
 	unsigned long sel[ColLast];
@@ -52,11 +57,7 @@ typedef struct {
 	} font;
 } DC;  /* draw context */
 
-#if USE_XLIB
 void drawrect(DC *dc, int x, int y, unsigned int w, unsigned int h, Bool fill, unsigned long color);
-#elif USE_WINAPI
-void drawrect(DC *dc, int x, int y, unsigned int w, unsigned int h, BOOL fill, unsigned long color);
-#endif
 void drawtext(DC *dc, const char *text, unsigned long col[ColLast]);
 void drawtextn(DC *dc, const char *text, size_t n, unsigned long col[ColLast]);
 void eprintf(const char *fmt, ...);
@@ -64,11 +65,7 @@ void freedc(DC *dc);
 unsigned long getcolor(DC *dc, const char *colstr);
 DC *initdc(void);
 void initfont(DC *dc, const char *fontstr);
-#if USE_XLIB
 void mapdc(DC *dc, Window win, unsigned int w, unsigned int h);
-#elif USE_WINAPI
-void mapdc(DC *dc, HWND win, unsigned int w, unsigned int h);
-#endif
 void resizedc(DC *dc, unsigned int w, unsigned int h);
 int textnw(DC *dc, const char *text, size_t len);
 int textw(DC *dc, const char *text);

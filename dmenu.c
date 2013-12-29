@@ -30,16 +30,63 @@
 #define MIN(a,b)              ((a) < (b) ? (a) : (b))
 #define MAX(a,b)              ((a) > (b) ? (a) : (b))
 
+
+/* portibility stuff */
+#if USE_WINAPI
+#define WINDOW HWND
+#define Pixmap HDC
+#define GC HDC
+#define False FALSE
+#define True TRUE
+#define Bool BOOL
+#define XK_a 'A'
+#define XK_b 'B'
+#define XK_c 'C'
+#define XK_d 'D'
+#define XK_e 'E'
+#define XK_f 'F'
+#define XK_g 'G'
+#define XK_h 'H'
+#define XK_i 'I'
+#define XK_J 'J'
+#define XK_m 'M'
+#define XK_M 'M'
+#define XK_n 'N'
+#define XK_p 'P'
+#define XK_k 'K'
+#define XK_u 'U'
+#define XK_w 'W'
+#define XK_y 'Y'
+#define XK_Return VK_RETURN
+#define XK_KP_Enter VK_RETURN
+#define XK_bracketleft VK_OEM_4
+#define XK_G 'G'
+#define XK_j 'J'
+#define XK_k 'K'
+#define XK_l 'L'
+#define XK_Home VK_HOME
+#define XK_Left VK_LEFT
+#define XK_Escape VK_ESCAPE
+#define XK_Delete VK_DELETE
+#define XK_End VK_END
+#define XK_Right VK_RIGHT
+#define XK_Escape VK_ESCAPE
+#define XK_BackSpace VK_BACK
+#define XK_Tab VK_TAB
+#define XK_Down VK_DOWN
+#define XK_Up VK_UP
+#define ShiftMask VK_SHIFT
+#define XK_Prior VK_PRIOR
+#define XK_Next VK_NEXT
+#endif
+
 typedef struct Item Item;
 struct Item {
 	char *text;
 	Item *left, *right;
-#if USE_XLIB
 	Bool out;
-#elif USE_WINAPI
-	BOOL out;
-#endif
 };
+
 
 static void appenditem(Item *item, Item **list, Item **last);
 static void calcoffsets(void);
@@ -85,7 +132,7 @@ static XIC xic;
 #elif USE_WINAPI
 static HWND win;
 static int sx, sy, sw, sh; /* X display screen geometry x, y, width, height */ 
-static int by, bh, blw;    /* bar geometry y, height and layout symbol width */
+static int by, bh;    /* bar geometry y, height and layout symbol width */
 static int wx, wy, ww, wh; /* window area geometry x, y, width, height, bar excluded */
 #endif
 static int mon = -1;
@@ -110,11 +157,10 @@ static char *(*fstrstr)(const char *, const char *) = strstr;
 #if USE_XLIB
 int
 main(int argc, char *argv[]) {
-	Bool fast = False;
 #elif USE_WINAPI
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {	
-	BOOL fast = FALSE;
 #endif
+	Bool fast = False;
 	int i;
 
 #if USE_WINAPI
@@ -160,7 +206,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			targc--;
 		}
 	}
-
 #endif
 
 	for(i = 1; i < argc; i++) {
@@ -170,17 +215,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			exit(EXIT_SUCCESS);
 		}
 		else if(!strcmp(argv[i], "-b"))   /* appears at the bottom of the screen */
-#if USE_XLIB
 			topbar = False;
-#elif USE_WINAPI
-			topbar = FALSE;
-#endif
 		else if(!strcmp(argv[i], "-f"))   /* grabs keyboard before reading stdin */
-#if USE_XLIB
 			fast = True;
-#elif USE_WINAPI
-			fast = TRUE;
-#endif
 		else if(!strcmp(argv[i], "-i")) { /* case-insensitive item matching */
 			fstrncmp = strncasecmp;
 			fstrstr = cistrstr;
@@ -340,11 +377,7 @@ drawmenu(void) {
 	dc->x = 0;
 	dc->y = 0;
 	dc->h = bh;
-#if USE_XLIB	
 	drawrect(dc, 0, 0, mw, mh, True, BG(dc, normcol));
-#elif USE_WINAPI
-	drawrect(dc, 0, 0, mw, mh, TRUE, BG(dc, normcol));
-#endif
 
 	if(prompt && *prompt) {
 		dc->w = promptw;
@@ -355,11 +388,7 @@ drawmenu(void) {
 	dc->w = (lines > 0 || !matches) ? mw - dc->x : inputw;
 	drawtext(dc, text, normcol);
 	if((curpos = textnw(dc, text, cursor) + dc->h/2 - 2) < dc->w)
-#if USE_XLIB	
 		drawrect(dc, curpos, 2, 1, dc->h - 4, True, FG(dc, normcol));
-#elif USE_WINAPI
-		drawrect(dc, curpos, 2, 1, dc->h - 4, TRUE, FG(dc, normcol));
-#endif
 
 	if(lines > 0) {
 		/* draw vertical list */
@@ -423,15 +452,35 @@ insert(const char *str, ssize_t n) {
 #if USE_XLIB
 void
 keypress(XKeyEvent *ev) {
+#elif USE_WINAPI
+void
+keypress(WPARAM ksym) {
+	char c;
+#endif
 	char buf[32];
 	int len;
+	
+#if USE_XLIB
 	KeySym ksym = NoSymbol;
 	Status status;
 
 	len = XmbLookupString(xic, ev, buf, sizeof buf, &ksym, &status);
 	if(status == XBufferOverflow)
 		return;
+#elif USE_WINAPI
+	c = MapVirtualKey(ksym,MAPVK_VK_TO_CHAR);
+	if (GetAsyncKeyState(VK_SHIFT) || (GetKeyState(VK_CAPITAL) & 0x0001) != 0)
+		sprintf(buf,"%c",c);
+	else
+		sprintf(buf,"%c",tolower(c));
+	len = 1;
+#endif
+
+#if USE_XLIB
 	if(ev->state & ControlMask)
+#elif USE_WINAPI
+	if(GetAsyncKeyState(VK_CONTROL))
+#endif
 		switch(ksym) {
 		case XK_a: ksym = XK_Home;      break;
 		case XK_b: ksym = XK_Left;      break;
@@ -442,9 +491,13 @@ keypress(XKeyEvent *ev) {
 		case XK_g: ksym = XK_Escape;    break;
 		case XK_h: ksym = XK_BackSpace; break;
 		case XK_i: ksym = XK_Tab;       break;
+#if USE_XLIB
 		case XK_j: /* fallthrough */
+#endif
 		case XK_J: ksym = XK_Return;    break;
+#if USE_XLIB
 		case XK_m: /* fallthrough */
+#endif
 		case XK_M: ksym = XK_Return;    break;
 		case XK_n: ksym = XK_Down;      break;
 		case XK_p: ksym = XK_Up;        break;
@@ -463,21 +516,38 @@ keypress(XKeyEvent *ev) {
 				insert(NULL, nextrune(-1) - cursor);
 			break;
 		case XK_y: /* paste selection */
+#if USE_XLIB
 			XConvertSelection(dc->dpy, (ev->state & ShiftMask) ? clip : XA_PRIMARY,
 			                  utf8, utf8, win, CurrentTime);
+#endif
 			return;
 		case XK_Return:
+#if USE_XLIB
 		case XK_KP_Enter:
+#endif
 			break;
 		case XK_bracketleft:
 			exit(EXIT_FAILURE);
 		default:
 			return;
 		}
+#if USE_XLIB
 	else if(ev->state & Mod1Mask)
+#elif USE_WINAPI
+	else if(GetAsyncKeyState(VK_MENU))
+#endif
 		switch(ksym) {
+#if USE_WINAPI
+		case XK_g: 
+			if (GetAsyncKeyState(VK_SHIFT) || (GetKeyState(VK_CAPITAL) & 0x0001) != 0)
+				ksym = VK_END; /*XK_G*/
+			else
+				ksym = VK_HOME;  /*XK_g*/
+		break;
+#elif USE_XLIB
 		case XK_g: ksym = XK_Home;  break;
 		case XK_G: ksym = XK_End;   break;
+#endif
 		case XK_h: ksym = XK_Up;    break;
 		case XK_j: ksym = XK_Next;  break;
 		case XK_k: ksym = XK_Prior; break;
@@ -553,9 +623,19 @@ keypress(XKeyEvent *ev) {
 		calcoffsets();
 		break;
 	case XK_Return:
+#if USE_XLIB
 	case XK_KP_Enter:
+#endif
+#if USE_XLIB	
 		puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
+#elif USE_WINAPI
+		puts((sel && !(GetAsyncKeyState(VK_SHIFT))) ? sel->text : text);
+#endif
+#if USE_XLIB
 		if(!(ev->state & ControlMask))
+#elif USE_WINAPI
+		if(!(GetAsyncKeyState(VK_CONTROL)))
+#endif
 			exit(EXIT_SUCCESS);
 		sel->out = True;
 		break;
@@ -584,178 +664,6 @@ keypress(XKeyEvent *ev) {
 	}
 	drawmenu();
 }
-#elif USE_WINAPI
-void
-keypress(WPARAM ksym/*XKeyEvent *ev*/) {
-	char buf[32];
-	int len;
-
-	char c;
-	c = MapVirtualKey(ksym,MAPVK_VK_TO_CHAR);
-	if (GetAsyncKeyState(VK_SHIFT) || (GetKeyState(VK_CAPITAL) & 0x0001) != 0)
-		sprintf(buf,"%c",c);
-	else
-		sprintf(buf,"%c",tolower(c));
-	len = 1;
-
-	/*
-	KeySym ksym = NoSymbol;
-	Status status;
-
-	len = XmbLookupString(xic, ev, buf, sizeof buf, &ksym, &status);
-	if(status == XBufferOverflow)
-		return;
-		//VK_LCONTROL VK_RCONTROL
-	len = SendMessage(dc->hedit, WM_GETTEXTLENGTH, 0, 0);
-	*/
-	
-	if(GetAsyncKeyState(VK_CONTROL)/*ev->state & ControlMask*/)
-		switch(ksym) {
-		case 0x41/*XK_a*/: ksym = VK_HOME;      break;
-		case 0x42/*XK_b*/: ksym = VK_LEFT;      break;
-		case 0x43/*XK_c*/: ksym = VK_ESCAPE;    break;
-		case 0x44/*XK_d*/: ksym = VK_DELETE;    break;
-		case 0x45/*XK_e*/: ksym = VK_END;       break;
-		case 0x46/*XK_f*/: ksym = VK_RIGHT;     break;
-		case 0x48/*XK_h*/: ksym = VK_BACK; break;
-		case 0x49/*XK_i*/: ksym = VK_TAB;       break;
-		case 0x4A/*XK_j*/: ksym = VK_RETURN;    break;
-		case 0x4D/*XK_m*/: ksym = VK_RETURN;    break;
-		case 0x4E/*XK_n*/: ksym = VK_DOWN;      break;
-		case 0x50/*XK_p*/: ksym = VK_UP;        break;
-
-		case 0x4B/*XK_k*/: /* delete right */
-			text[cursor] = '\0';
-			match();
-			break;
-		case 0x55/*XK_u*/: /* delete left */
-			insert(NULL, 0 - cursor);
-			break;
-		case 0x57/*XK_w*/: /* delete word */
-			while(cursor > 0 && text[nextrune(-1)] == ' ')
-				insert(NULL, nextrune(-1) - cursor);
-			while(cursor > 0 && text[nextrune(-1)] != ' ')
-				insert(NULL, nextrune(-1) - cursor);
-			break;
-		case 0x59/*XK_y*/: /* paste selection */
-/*			XConvertSelection(dc->dpy, (ev->state & ShiftMask) ? clip : XA_PRIMARY,
-			                  utf8, utf8, win, CurrentTime);*/
-			return;
-		default:
-			return;
-		}
-	else if(GetAsyncKeyState(VK_MENU)/*ev->state & Mod1Mask*/)
-		switch(ksym) {
-		case 0x47/*XK_g*/: 
-			if (GetAsyncKeyState(VK_SHIFT) || (GetKeyState(VK_CAPITAL) & 0x0001) != 0)
-				ksym = VK_END; /*XK_G*/
-			else
-				ksym = VK_HOME;  /*XK_g*/
-		break;
-		/* case 0x47 XK_G: ksym = VK_END;   break;  handled */
-		case 0x48/*XK_h*/: ksym = VK_UP;    break;
-		case 0x4A/*XK_j*/: ksym = VK_NEXT;  break;
-		case 0x4B/*XK_k*/: ksym = VK_PRIOR; break;
-		case 0x4C/*XK_l*/: ksym = VK_DOWN;  break;
-		default:
-			return;
-		}
-	switch(ksym) {
-	default:
-		if(!iscntrl(*buf))
-			insert(buf, len);
-		break;
-	case VK_DELETE:
-		if(text[cursor] == '\0')
-			return;
-		cursor = nextrune(+1);
-		/* fallthrough */
-	case VK_BACK:
-		if(cursor == 0)
-			return;
-		insert(NULL, nextrune(-1) - cursor);
-		break;
-	case VK_END:
-		if(text[cursor] != '\0') {
-			cursor = strlen(text);
-			break;
-		}
-		if(next) {
-			/* jump to end of list and position items in reverse */
-			curr = matchend;
-			calcoffsets();
-			curr = prev;
-			calcoffsets();
-			while(next && (curr = curr->right))
-				calcoffsets();
-		}
-		sel = matchend;
-		break;
-	case VK_ESCAPE:
-		exit(EXIT_FAILURE);
-	case VK_HOME:
-		if(sel == matches) {
-			cursor = 0;
-			break;
-		}
-		sel = curr = matches;
-		calcoffsets();
-		break;
-	case VK_LEFT:
-		if(cursor > 0 && (!sel || !sel->left || lines > 0)) {
-			cursor = nextrune(-1);
-			break;
-		}
-		if(lines > 0)
-			return;
-		/* fallthrough */
-	case VK_UP:
-		if(sel && sel->left && (sel = sel->left)->right == curr) {
-			curr = prev;
-			calcoffsets();
-		}
-		break;
-	case VK_NEXT:
-		if(!next)
-			return;
-		sel = curr = next;
-		calcoffsets();
-		break;
-	case VK_PRIOR:
-		if(!prev)
-			return;
-		sel = curr = prev;
-		calcoffsets();
-		break;
-	case VK_RETURN:
-/*	case VK_RETURN*//*XK_KP_Enter:*/
-		puts((sel && !(GetAsyncKeyState(VK_SHIFT)/*ev->state & ShiftMask*/)) ? sel->text : text);
-		exit(EXIT_SUCCESS);
-	case VK_RIGHT:
-		if(text[cursor] != '\0') {
-			cursor = nextrune(+1);
-			break;
-		}
-		if(lines > 0)
-			return;
-		/* fallthrough */
-	case VK_DOWN:
-		if(sel && sel->right && (sel = sel->right) == next) {
-			curr = next;
-			calcoffsets();
-		}
-		break;
-	case VK_TAB:
-		if(!sel)
-			return;
-		strncpy(text, sel->text, sizeof text);
-		cursor = strlen(text);
-		match();
-		break;
-	}
-	drawmenu();
-}
-#endif
 
 void
 match(void) {
@@ -865,11 +773,7 @@ readstdin(void) {
 			*p = '\0';
 		if(!(items[i].text = strdup(buf)))
 			eprintf("cannot strdup %u bytes:", strlen(buf)+1);
-#if USE_XLIB			
 		items[i].out = False;
-#elif USE_WINAPI
-		items[i].out = FALSE;
-#endif
 		if(strlen(items[i].text) > max)
 			max = strlen(maxstr = items[i].text);
 	}

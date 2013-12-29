@@ -13,18 +13,13 @@
 #define MIN(a, b)  ((a) < (b) ? (a) : (b))
 #define DEFAULTFN  "fixed"
 
-#if USE_XLIB
 static Bool loadfont(DC *dc, const char *fontstr);
-#elif USE_WINAPI
-static BOOL loadfont(DC *dc, const char *fontstr);
-#endif
 
 void
-#if USE_XLIB
 drawrect(DC *dc, int x, int y, unsigned int w, unsigned int h, Bool fill, unsigned long color) {
+#if USE_XLIB
 	XSetForeground(dc->dpy, dc->gc, color);
 #elif USE_WINAPI
-drawrect(DC *dc, int x, int y, unsigned int w, unsigned int h, BOOL fill, unsigned long color) { /* bbggrr */
 	SetDCBrushColor(dc->canvas, color); /* bbggrr */
 #endif	
 	if(fill)
@@ -59,11 +54,7 @@ drawtext(DC *dc, const char *text, unsigned long col[ColLast]) {
 	if(mn < n)
 		for(n = MAX(mn-3, 0); n < mn; buf[n++] = '.');
 
-#if USE_XLIB
 	drawrect(dc, 0, 0, dc->w, dc->h, True, BG(dc, col));
-#elif USE_WINAPI
-	drawrect(dc, 0, 0, dc->w, dc->h, TRUE, BG(dc, col));
-#endif	
 	drawtextn(dc, buf, mn, col);
 }
 
@@ -176,13 +167,8 @@ initfont(DC *dc, const char *fontstr) {
 	dc->font.height = dc->font.ascent + dc->font.descent;
 }
 
-#if USE_XLIB
 Bool
 loadfont(DC *dc, const char *fontstr) {
-#elif USE_WINAPI
-BOOL
-loadfont(DC *dc, const char *fontstr) {
-#endif
 #if USE_XLIB	
 	char *def, **missing, **names;
 	int i, n;
@@ -220,13 +206,11 @@ loadfont(DC *dc, const char *fontstr) {
 #endif	
 }
 
-#if USE_XLIB
 void
 mapdc(DC *dc, Window win, unsigned int w, unsigned int h) {
+#if USE_XLIB
 	XCopyArea(dc->dpy, dc->canvas, win, dc->gc, 0, 0, w, h, 0, 0);
 #elif USE_WINAPI
-void
-mapdc(DC *dc, HWND win, unsigned int w, unsigned int h) {
 	BitBlt(dc->gc, 0, 0, w, h, dc->canvas, 0, 0, SRCCOPY);
 #endif	
 }
