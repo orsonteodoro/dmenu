@@ -20,6 +20,8 @@ drawrect(DC *dc, int x, int y, unsigned int w, unsigned int h, Bool fill, unsign
 #if USE_XLIB
 	XSetForeground(dc->dpy, dc->gc, color);
 #elif USE_WINAPI
+	RECT r;
+	HBRUSH hbr;
 	SetDCBrushColor(dc->canvas, color); /* bbggrr */
 #endif	
 	if(fill)
@@ -27,10 +29,10 @@ drawrect(DC *dc, int x, int y, unsigned int w, unsigned int h, Bool fill, unsign
 		XFillRectangle(dc->dpy, dc->canvas, dc->gc, dc->x + x, dc->y + y, w, h);
 #elif USE_WINAPI
 	{
-		RECT r;
-		HBRUSH hbr = CreateSolidBrush(color); /* bbggrr */
+		hbr = CreateSolidBrush(color); /* bbggrr */
 		SetRect(&r, dc->x + x, dc->y + y, dc->x + x + w, dc->y + y + h);
 		FillRect(dc->canvas, &r, hbr);
+		DeleteObject(hbr);
 	}
 #endif		
 	else
